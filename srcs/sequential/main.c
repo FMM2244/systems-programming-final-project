@@ -6,6 +6,7 @@
 # include <sys/time.h>
 # include <sys/wait.h>
 # include <sys/types.h>
+# include <strings.h>
 
 /**
  * a struct that holds a 2 dimentional array its rows and columns
@@ -43,7 +44,7 @@ void printMatrix(mtrx_t m) {
 }
 
 void freeMatrix(mtrx_t *m) {
-	for (unsigned int i = 0; i < m->nb_rows; i++)
+	for (int i = 0; i < m->nb_rows; i++)
 		free(m->mtrx[i]);
 	free(m->mtrx);
 }
@@ -88,14 +89,14 @@ int multiply(mtrx_t *A, mtrx_t *B, mtrx_t *C) {
 		return 1;
 	}
 
-	C->mtrx = malloc(A->nb_rows * sizeof(int *));
+	C->mtrx = malloc(C->nb_rows * sizeof(int *));
 	if (C->mtrx == NULL) {
 		printf("Error: Can't Multiply Matrices\n");
 		return 1;
 	}
 
-	for (int i = 0; i < B->nb_columns; i++) {
-		C->mtrx[i] = malloc(B->nb_columns * sizeof(int));
+	for (int i = 0; i < C->nb_rows; i++) {
+		C->mtrx[i] = malloc(C->nb_columns * sizeof(int));
 
 		if (C->mtrx[i] == NULL) {
 			for (int j = 0; j < i; j++)
@@ -173,6 +174,8 @@ int main(int ac, char **av) {
 	mtrx_t A;
 	mtrx_t B;
 
+	bzero(&A, sizeof(mtrx_t *));
+	bzero(&B, sizeof(mtrx_t *));
 	generateRandomMatrix(&A);
 	generateRandomMatrix(&B);
 
@@ -198,10 +201,11 @@ int main(int ac, char **av) {
 	int flag = multiply(&A, &B, &C);
 	struct timeval multiEnd;
 	gettimeofday(&multiEnd, NULL);
-	printf("Time taken to perform Multiplication: %ld\n", (long)(multiEnd.tv_sec - multiStart.tv_sec + (multiEnd.tv_usec - multiStart.tv_usec) * 1000000));
+	printf("Time taken to perform Multiplication: %ld us\n", (long)((multiEnd.tv_sec - multiStart.tv_sec) * 1000000 + multiEnd.tv_usec - multiStart.tv_usec));
 	if (!flag) {
 		printf("Result Matrix:\n\n");
 		printMatrix(C);
+		freeMatrix(&C);
 	}
 
 	// 2. Matrix Transposition
@@ -210,24 +214,29 @@ int main(int ac, char **av) {
 	struct timeval tranStart;
 	gettimeofday(&tranStart, NULL);
 	mtrx_t D;
+	bzero(&D, sizeof(mtrx_t *));
 	flag = transposition(&A, &D);
 	struct timeval tranEnd;
 	gettimeofday(&tranEnd, NULL);
-	printf("Time taken to perform Transposition: %ld\n", (long)(tranEnd.tv_sec - tranStart.tv_sec + (tranEnd.tv_usec - tranStart.tv_usec) * 1000000));
-	printf("Result Matrix:\n\n");
-	if (!flag)
+	printf("Time taken to perform Transposition: %ld us\n", (long)((tranEnd.tv_sec - tranStart.tv_sec) * 1000000 + tranEnd.tv_usec - tranStart.tv_usec));
+	if (!flag) {
+		printf("Result Matrix:\n\n");
 		printMatrix(D);
-	freeMatrix(&D);
+		freeMatrix(&D);
+	}
 
 	printf("\n==================================================================\n");
 	printf("\nPerforming Matrix Transposition on Matrix (B)\n");
 	gettimeofday(&tranStart, NULL);
+	bzero(&D, sizeof(mtrx_t *));
 	flag = transposition(&B, &D);
 	gettimeofday(&tranEnd, NULL);
-	printf("Time taken to perform Transposition: %ld\n", (long)(tranEnd.tv_sec - tranStart.tv_sec + (tranEnd.tv_usec - tranStart.tv_usec) * 1000000));
-	printf("Result Matrix:\n\n");
-	if (!flag)
+	printf("Time taken to perform Transposition: %ld us\n", (long)((tranEnd.tv_sec - tranStart.tv_sec) * 1000000 + tranEnd.tv_usec - tranStart.tv_usec));
+	if (!flag) {
+		printf("Result Matrix:\n\n");
 		printMatrix(D);
+		freeMatrix(&D);
+	}
 
 	// 3. Matrix Average
 	printf("\n==================================================================\n");
@@ -237,7 +246,7 @@ int main(int ac, char **av) {
 	int E = avarage(&A);
 	struct timeval avgEnd;
 	gettimeofday(&avgEnd, NULL);
-	printf("Time taken to calculate avarage: %ld\n", (long)(avgEnd.tv_sec - avgStart.tv_sec + (avgEnd.tv_usec - avgStart.tv_usec) * 1000000));
+	printf("Time taken to calculate avarage: %ld us\n", (long)((avgEnd.tv_sec - avgStart.tv_sec) * 1000000 + avgEnd.tv_usec - avgStart.tv_usec));
 	printf("Matrix (A) Avarage = %d\n", E);
 	
 	printf("\n==================================================================\n");
@@ -245,19 +254,17 @@ int main(int ac, char **av) {
 	gettimeofday(&avgStart, NULL);
 	E = avarage(&B);
 	gettimeofday(&avgEnd, NULL);
-	printf("Time taken to calculate avarage: %ld\n", (long)(avgEnd.tv_sec - avgStart.tv_sec + (avgEnd.tv_usec - avgStart.tv_usec) * 1000000));
+	printf("Time taken to calculate avarage: %ld us\n", (long)((avgEnd.tv_sec - avgStart.tv_sec) * 1000000 + avgEnd.tv_usec - avgStart.tv_usec));
 	printf("Matrix (A) Avarage = %d\n", E);
 
 	// Stop Overall_Timer
 
 	struct timeval end;
 	gettimeofday(&end, NULL);
-	printf("Total time taken: %ld\n", (long)(end.tv_sec - start.tv_sec + (end.tv_usec - start.tv_usec) * 1000000));
+	printf("Total time taken: %ld us\n", (long)((end.tv_sec - start.tv_sec) * 1000000 + end.tv_usec - start.tv_usec));
 
 	freeMatrix(&A);
 	freeMatrix(&B);
-	freeMatrix(&C);
-	freeMatrix(&D);
 
 	return 0;
 }
