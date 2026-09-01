@@ -34,6 +34,26 @@ void handleError(int flag) {
 }
 
 /**
+ * waits for all child processes spawned by the parent to exit
+ */
+void waitForAllChildren(void) {
+	pid_t pid;
+	int status;
+
+	while (1) {
+		pid = waitpid(-1, &status, 0);
+		if (pid == -1) {
+			if (errno == EINTR)
+				continue;
+			if (errno == ECHILD)
+				break;
+			perror("waitpid");
+			break;
+		}
+	}
+}
+
+/**
  * prints the contents of a 2 dimentional matrix on the standerd output
  */
 void printMatrix(mtrx_t m) {
@@ -85,16 +105,12 @@ int multiply(mtrx_t *A, mtrx_t *B, mtrx_t *C) {
 	C->nb_rows = A->nb_rows;
 	C->nb_columns = B->nb_columns;
 
-	if (A->nb_columns != B->nb_rows) {
-		printf("Error: Can't Multiply Matrices\n");
+	if (A->nb_columns != B->nb_rows)
 		return 1;
-	}
 
 	C->mtrx = malloc(C->nb_rows * sizeof(int *));
-	if (C->mtrx == NULL) {
-		printf("Error: Can't Multiply Matrices\n");
+	if (C->mtrx == NULL)
 		return 1;
-	}
 
 	for (int i = 0; i < C->nb_rows; i++) {
 		C->mtrx[i] = malloc(C->nb_columns * sizeof(int));
@@ -107,18 +123,43 @@ int multiply(mtrx_t *A, mtrx_t *B, mtrx_t *C) {
 		}
 	}
 
+	int read_fds[C->nb_rows];
+
 	for (int i = 0; i < C->nb_rows; i++) {
+		int fds[2];
+		if (pipe(fds) == -1) {
+			perror("pipe");
+			freeMatrix(A);
+			freeMatrix(B);
+			freeMatrix(C);
+			waitForAllChildren();
+			exit(EXIT_FAILURE);
+		}
 		int pid = fork();
 		if (pid == 0) {
+			close(fds[0]);
+			dup2(fds[1], STDOUT_FILENO);
 			for (int j = 0; j < C->nb_columns; j++) {
 				C->mtrx[i][j] = 0;
-				// multiply row of A by column of B
-				for (int k = 0; k < A->nb_columns; k++) {
+				// multiply row of A by columns of B
+				for (int k = 0; k < A->nb_columns; k++)
 					C->mtrx[i][j] += A->mtrx[i][k] * B->mtrx[k][j];
-				}
 			}
+			write(fds[1], C->mtrx[i], sizeof(int) * C->nb_columns);
+			freeMatrix(A);
+			freeMatrix(B);
+			freeMatrix(C);
+			exit(EXIT_SUCCESS);
 		}
+		close(fds[1]);
+		read_fds[i] = fds[0];
 	}
+
+	waitForAllChildren();
+
+	for (int i = 0; i < C->nb_rows; i++)
+		read(read_fds[i], C->mtrx[i], sizeof(int) * C->nb_columns);
+
 	return 0;
 }
 
@@ -165,26 +206,6 @@ int transposition(mtrx_t *A, mtrx_t *B) {
 			B->mtrx[i][j] = A->mtrx[j][i];
 	
 	return 0;
-}
-
-/**
- * waits for all child processes spawned by the parent to exit
- */
-void waitForAllChildren(void) {
-	pid_t pid;
-	int status;
-
-	while (1) {
-		pid = waitpid(-1, &status, 0);
-		if (pid == -1) {
-			if (errno == EINTR)
-				continue;
-			if (errno == ECHILD)
-				break;
-			perror("waitpid");
-			break;
-		}
-	}
 }
 
 /**
@@ -288,8 +309,7 @@ int main(int ac, char **av) {
 	// printf("==================================================================\n");
 
 	// Start Overall_Timer
-
-	struct timeval start;
+	struct timeval start, end;
 	gettimeofday(&start, NULL);
 
 	// Matrix Multiplication
@@ -301,20 +321,23 @@ int main(int ac, char **av) {
 			printf("Error: can't open file \"a_b_multiplication_result.txt\"\n");
 			exit(EXIT_FAILURE);
 		}
-		dup2(fd, STDOUT_FILENO);
-		close(fd);
-		struct timeval multiStart;
+		struct timeval multiStart, multiEnd;
 		gettimeofday(&multiStart, NULL);
 		mtrx_t C;
 		int flag = multiply(&A, &B, &C);
-		struct timeval multiEnd;
 		gettimeofday(&multiEnd, NULL);
+		dup2(fd, STDOUT_FILENO);
+		close(fd);
 		printf("Time taken: %ld us\n", (long)((multiEnd.tv_sec - multiStart.tv_sec) * 1000000 + multiEnd.tv_usec - multiStart.tv_usec));
 		if (!flag) {
 			printf("Result Matrix:\n\n");
 			printMatrix(C);
 			freeMatrix(&C);
 		}
+		else
+			printf("Error: Can't Multiply Matrices\n");
+		freeMatrix(&A);
+		freeMatrix(&B);
 		exit(EXIT_SUCCESS);
 	}
 
@@ -421,7 +444,6 @@ int main(int ac, char **av) {
 	printResults();
 
 	// Stop Overall_Timer
-	struct timeval end;
 	gettimeofday(&end, NULL);
 	printf("Total time taken: %ld us\n", (long)((end.tv_sec - start.tv_sec) * 1000000 + end.tv_usec - start.tv_usec));
 
