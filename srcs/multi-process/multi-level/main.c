@@ -22,6 +22,7 @@ typedef struct matrix {
  * prints an error prompt based on the value passed as flag
  */
 void handleError(int flag) {
+
 	switch (flag) {
 	case 0:
 		perror("malloc");
@@ -36,7 +37,8 @@ void handleError(int flag) {
 /**
  * waits for all child processes spawned by the parent to exit
  */
-void waitForAllChildren(void) {
+void waitForAllChildren() {
+
 	pid_t pid;
 	int status;
 
@@ -157,8 +159,10 @@ int multiply(mtrx_t *A, mtrx_t *B, mtrx_t *C) {
 
 	waitForAllChildren();
 
-	for (int i = 0; i < C->nb_rows; i++)
+	for (int i = 0; i < C->nb_rows; i++) {
 		read(read_fds[i], C->mtrx[i], sizeof(int) * C->nb_columns);
+		close(read_fds[i]);
+	}
 
 	return 0;
 }
@@ -167,11 +171,41 @@ int multiply(mtrx_t *A, mtrx_t *B, mtrx_t *C) {
  * calculate the avarage of matrix m
  */
 int avarage(mtrx_t *m) {
+
 	long res = 0;
 
-	for (int i = 0; i < m->nb_rows; i++)
-		for (int j = 0; j < m->nb_columns; j++)
-			res += m->mtrx[i][j];
+	int read_fds[m->nb_rows];
+
+	for (int i = 0; i < m->nb_rows; i++) {
+		int fds[2];
+		if (pipe(fds) == -1) {
+			perror("pipe");
+			freeMatrix(m);
+			waitForAllChildren();
+			exit(EXIT_FAILURE);
+		}
+		int pid = fork();
+		if (pid == 0) {
+			close(fds[0]);
+			dup2(fds[1], STDOUT_FILENO);
+			for (int j = 0; j < m->nb_columns; j++)
+				res += m->mtrx[i][j];
+			write(fds[1], &res, sizeof(int));
+			freeMatrix(m);
+			exit(EXIT_SUCCESS);
+		}
+		close(fds[1]);
+		read_fds[i] = fds[0];
+	}
+
+	waitForAllChildren();
+
+	for (int i = 0; i < m->nb_rows; i++) {
+		int tmp;
+		read(read_fds[i], &tmp, sizeof(int));
+		res += tmp;
+		close(read_fds[i]);
+	}
 
 	return (int)(res / (m->nb_rows * m->nb_columns));
 }
@@ -180,6 +214,7 @@ int avarage(mtrx_t *m) {
  * transposis matrix A and stores the output in matrix B
  */
 int transposition(mtrx_t *A, mtrx_t *B) {
+
 	B->nb_rows = A->nb_columns;
 	B->nb_columns = A->nb_rows;
 
@@ -201,10 +236,39 @@ int transposition(mtrx_t *A, mtrx_t *B) {
 		}
 	}
 
-	for (int i = 0; i < B->nb_rows; i++)
-		for (int j = 0; j < B->nb_columns; j++)
-			B->mtrx[i][j] = A->mtrx[j][i];
-	
+	int read_fds[B->nb_rows];
+
+	for (int i = 0; i < B->nb_rows; i++) {
+		int fds[2];
+		if (pipe(fds) == -1) {
+			perror("pipe");
+			freeMatrix(A);
+			freeMatrix(B);
+			waitForAllChildren();
+			exit(EXIT_FAILURE);
+		}
+		int pid = fork();
+		if (pid == 0) {
+			close(fds[0]);
+			dup2(fds[1], STDOUT_FILENO);
+			for (int j = 0; j < B->nb_columns; j++)
+				B->mtrx[i][j] = A->mtrx[j][i];
+			write(fds[1], B->mtrx[i], sizeof(int) * B->nb_columns);
+			freeMatrix(A);
+			freeMatrix(B);
+			exit(EXIT_SUCCESS);
+		}
+		close(fds[1]);
+		read_fds[i] = fds[0];
+	}
+
+	waitForAllChildren();
+
+	for (int i = 0; i < B->nb_rows; i++) {
+		read(read_fds[i], B->mtrx[i], sizeof(int) * B->nb_columns);
+		close(read_fds[i]);
+	}
+
 	return 0;
 }
 
@@ -212,72 +276,87 @@ int transposition(mtrx_t *A, mtrx_t *B) {
  * prints the output text files on the terminal by executing the cat command
  */
 void printResults() {
-	int status;
-	char *const multi_argv[] = {"/usr/bin/cat", "a_b_multiplication_result.txt", NULL};
-	char *const a_transpose_argv[] = {"/usr/bin/cat", "a_transpose_result.txt", NULL};
-	char *const b_transpose_argv[] = {"/usr/bin/cat", "b_transpose_result.txt", NULL};
-	char *const a_avg_argv[] = {"/usr/bin/cat", "a_avarage_result.txt", NULL};
-	char *const b_avg_argv[] = {"/usr/bin/cat", "b_avarage_result.txt", NULL};
+	// int status;
+	// char *const multi_argv[] = {"/usr/bin/cat", "a_b_multiplication_result.txt", NULL};
+	// char *const a_transpose_argv[] = {"/usr/bin/cat", "a_transpose_result.txt", NULL};
+	// char *const b_transpose_argv[] = {"/usr/bin/cat", "b_transpose_result.txt", NULL};
+	// char *const a_avg_argv[] = {"/usr/bin/cat", "a_avarage_result.txt", NULL};
+	// char *const b_avg_argv[] = {"/usr/bin/cat", "b_avarage_result.txt", NULL};
 
-	int pid = fork();
-	if (pid == 0) {
-		printf("==================================================================\n");
-		printf("Matrix Multiplication on (A) & (B) result: \n");
-		execvp(multi_argv[0], multi_argv);
-		perror("execvp");
-		exit(EXIT_FAILURE);
-	}
-	wait(&status);
-	if (status)
-		printf("Error: couldn't print file\ngo to a_b_multiplication_result.txt and check it yourself\n");
+	// int pid = fork();
+	// if (pid == 0) {
+	// 	printf("==================================================================\n");
+	// 	printf("Matrix Multiplication on (A) & (B) result: \n");
+	// 	execvp(multi_argv[0], multi_argv);
+	// 	perror("execvp");
+	// 	exit(EXIT_FAILURE);
+	// }
+	// wait(&status);
+	// if (status)
+	// 	printf("Error: couldn't print file\ngo to a_b_multiplication_result.txt and check it yourself\n");
 
-	pid = fork();
-	if (pid == 0) {
-		printf("==================================================================\n");
-		printf("Matrix Transposition on (A) result: \n");
-		execvp(a_transpose_argv[0], a_transpose_argv);
-		perror("execvp");
-		exit(EXIT_FAILURE);
-	}
-	wait(&status);
-	if (status)
-		printf("Error: couldn't print file\ngo to a_transpose_result.txt and check it yourself\n");
+	// pid = fork();
+	// if (pid == 0) {
+	// 	printf("==================================================================\n");
+	// 	printf("Matrix Transposition on (A) result: \n");
+	// 	execvp(a_transpose_argv[0], a_transpose_argv);
+	// 	perror("execvp");
+	// 	exit(EXIT_FAILURE);
+	// }
+	// wait(&status);
+	// if (status)
+	// 	printf("Error: couldn't print file\ngo to a_transpose_result.txt and check it yourself\n");
 
-	pid = fork();
-	if (pid == 0) {
-		printf("==================================================================\n");
-		printf("Matrix Transposition on (B) result: \n");
-		execvp(b_transpose_argv[0], b_transpose_argv);
-		perror("execvp");
-		exit(EXIT_FAILURE);
-	}
-	wait(&status);
-	if (status)
-		printf("Error: couldn't print file\ngo to b_transpose_result.txt and check it yourself\n");
+	// pid = fork();
+	// if (pid == 0) {
+	// 	printf("==================================================================\n");
+	// 	printf("Matrix Transposition on (B) result: \n");
+	// 	execvp(b_transpose_argv[0], b_transpose_argv);
+	// 	perror("execvp");
+	// 	exit(EXIT_FAILURE);
+	// }
+	// wait(&status);
+	// if (status)
+	// 	printf("Error: couldn't print file\ngo to b_transpose_result.txt and check it yourself\n");
 
-	pid = fork();
-	if (pid == 0) {
-		printf("==================================================================\n");
-		printf("Matrix Avarage of (A) result: \n");
-		execvp(a_avg_argv[0], a_avg_argv);
-		perror("execvp");
-		exit(EXIT_FAILURE);
-	}
-	wait(&status);
-	if (status)
-		printf("Error: couldn't print file\ngo to a_avarage_result.txt and check it yourself\n");
+	// pid = fork();
+	// if (pid == 0) {
+	// 	printf("==================================================================\n");
+	// 	printf("Matrix Avarage of (A) result: \n");
+	// 	execvp(a_avg_argv[0], a_avg_argv);
+	// 	perror("execvp");
+	// 	exit(EXIT_FAILURE);
+	// }
+	// wait(&status);
+	// if (status)
+	// 	printf("Error: couldn't print file\ngo to a_avarage_result.txt and check it yourself\n");
 
-	pid = fork();
-	if (pid == 0) {
-		printf("==================================================================\n");
-		printf("Matrix Avarage of (B) result: \n");
-		execvp(b_avg_argv[0], b_avg_argv);
-		perror("execvp");
-		exit(EXIT_FAILURE);
-	}
-	wait(&status);
-	if (status)
-		printf("Error: couldn't print file\ngo to b_avarage_result.txt and check it yourself\n");
+	// pid = fork();
+	// if (pid == 0) {
+	// 	printf("==================================================================\n");
+	// 	printf("Matrix Avarage of (B) result: \n");
+	// 	execvp(b_avg_argv[0], b_avg_argv);
+	// 	perror("execvp");
+	// 	exit(EXIT_FAILURE);
+	// }
+	// wait(&status);
+	printf("==================================================================\n");
+	printf("Matrix Multiplication on (A) & (B) result: \n");
+	system("cat a_b_multiplication_result.txt");
+	printf("==================================================================\n");
+	printf("Matrix Transposition on (A) result: \n");
+	system("cat a_transpose_result.txt");
+	printf("==================================================================\n");
+	printf("Matrix Transposition on (B) result: \n");
+	system("cat b_transpose_result.txt");
+	printf("==================================================================\n");
+	printf("Matrix Avarage of (A) result: \n");
+	system("cat a_avarage_result.txt");
+	printf("==================================================================\n");
+	printf("Matrix Avarage of (B) result: \n");
+	system("cat b_avarage_result.txt");
+	// if (status)
+	// 	printf("Error: couldn't print file\ngo to b_avarage_result.txt and check it yourself\n");
 }
 
 /**
@@ -288,9 +367,13 @@ int main(int ac, char **av) {
 
 	srand(time(NULL));
 
-	mtrx_t A = {0};
-	mtrx_t B = {0};
+	mtrx_t A;
+	mtrx_t B;
+	mtrx_t C;
 	int pids[5];
+	int fd;
+	int flag;
+	struct timeval s, e;
 
 	generateRandomMatrix(&A);
 	generateRandomMatrix(&B);
@@ -316,19 +399,18 @@ int main(int ac, char **av) {
 	pids[0] = fork();
 	if (pids[0] == 0) {
 		// printf("\n==================================================================\n");
-		int fd = open("a_b_multiplication_result.txt", O_WRONLY | O_CREAT | O_TRUNC, 0664);
+		fd = open("a_b_multiplication_result.txt", O_WRONLY | O_CREAT | O_TRUNC, 0664);
 		if (fd == -1) {
 			printf("Error: can't open file \"a_b_multiplication_result.txt\"\n");
 			exit(EXIT_FAILURE);
 		}
-		struct timeval multiStart, multiEnd;
-		gettimeofday(&multiStart, NULL);
-		mtrx_t C;
-		int flag = multiply(&A, &B, &C);
-		gettimeofday(&multiEnd, NULL);
+		struct timeval s, e;
+		gettimeofday(&s, NULL);
+		flag = multiply(&A, &B, &C);
+		gettimeofday(&e, NULL);
 		dup2(fd, STDOUT_FILENO);
 		close(fd);
-		printf("Time taken: %ld us\n", (long)((multiEnd.tv_sec - multiStart.tv_sec) * 1000000 + multiEnd.tv_usec - multiStart.tv_usec));
+		printf("Time taken: %ld us\n", (long)((e.tv_sec - s.tv_sec) * 1000000 + e.tv_usec - s.tv_usec));
 		if (!flag) {
 			printf("Result Matrix:\n\n");
 			printMatrix(C);
@@ -346,24 +428,21 @@ int main(int ac, char **av) {
 	if (pids[1] == 0) {
 		// printf("\n==================================================================\n");
 		// printf("\nPerforming Matrix Transposition on Matrix (A)\n");
-		int fd = open("a_transpose_result.txt", O_WRONLY | O_CREAT | O_TRUNC, 0664);
+		fd = open("a_transpose_result.txt", O_WRONLY | O_CREAT | O_TRUNC, 0664);
 		if (fd == -1) {
 			printf("Error: can't open file \"a_transpose_result.txt\"\n");
 			exit(EXIT_FAILURE);
 		}
+		gettimeofday(&s, NULL);
+		flag = transposition(&A, &C);
+		gettimeofday(&e, NULL);
 		dup2(fd, STDOUT_FILENO);
 		close(fd);
-		struct timeval tranStart;
-		gettimeofday(&tranStart, NULL);
-		mtrx_t D = {0};
-		int flag = transposition(&A, &D);
-		struct timeval tranEnd;
-		gettimeofday(&tranEnd, NULL);
-		printf("Time taken: %ld us\n", (long)((tranEnd.tv_sec - tranStart.tv_sec) * 1000000 + tranEnd.tv_usec - tranStart.tv_usec));
+		printf("Time taken: %ld us\n", (long)((e.tv_sec - s.tv_sec) * 1000000 + e.tv_usec - s.tv_usec));
 		if (!flag) {
 			printf("Result Matrix:\n\n");
-			printMatrix(D);
-			freeMatrix(&D);
+			printMatrix(C);
+			freeMatrix(&C);
 		}
 		exit(EXIT_SUCCESS);
 	}
@@ -372,24 +451,21 @@ int main(int ac, char **av) {
 	if (pids[2] == 0) {	
 		// printf("\n==================================================================\n");
 		// printf("\nPerforming Matrix Transposition on Matrix (B)\n");
-		int fd = open("b_transpose_result.txt", O_WRONLY | O_CREAT | O_TRUNC, 0664);
+		fd = open("b_transpose_result.txt", O_WRONLY | O_CREAT | O_TRUNC, 0664);
 		if (fd == -1) {
 			printf("Error: can't open file \"b_transpose_result.txt\"\n");
 			exit(EXIT_FAILURE);
 		}
+		gettimeofday(&s, NULL);
+		flag = transposition(&B, &C);
+		gettimeofday(&e, NULL);
 		dup2(fd, STDOUT_FILENO);
 		close(fd);
-		struct timeval tranStart;
-		gettimeofday(&tranStart, NULL);
-		mtrx_t D = {0};
-		int flag = transposition(&B, &D);
-		struct timeval tranEnd;
-		gettimeofday(&tranEnd, NULL);
-		printf("Time taken: %ld us\n", (long)((tranEnd.tv_sec - tranStart.tv_sec) * 1000000 + tranEnd.tv_usec - tranStart.tv_usec));
+		printf("Time taken: %ld us\n", (long)((e.tv_sec - s.tv_sec) * 1000000 + e.tv_usec - s.tv_usec));
 		if (!flag) {
 			printf("Result Matrix:\n\n");
-			printMatrix(D);
-			freeMatrix(&D);
+			printMatrix(C);
+			freeMatrix(&C);
 		}
 		exit(EXIT_SUCCESS);
 	}
@@ -399,19 +475,17 @@ int main(int ac, char **av) {
 	if (pids[3] == 0) {
 		// printf("\n==================================================================\n");
 		// printf("\nPerforming Avarage Calculation on Matrix (A)\n");
-		int fd = open("a_avarage_result.txt", O_WRONLY | O_CREAT | O_TRUNC, 0664);
+		fd = open("a_avarage_result.txt", O_WRONLY | O_CREAT | O_TRUNC, 0664);
 		if (fd == -1) {
 			printf("Error: can't open file \"a_avarage_result.txt\"\n");
 			exit(EXIT_FAILURE);
 		}
+		gettimeofday(&s, NULL);
+		int E = avarage(&A);
 		dup2(fd, STDOUT_FILENO);
 		close(fd);
-		struct timeval avgStart;
-		gettimeofday(&avgStart, NULL);
-		int E = avarage(&A);
-		struct timeval avgEnd;
-		gettimeofday(&avgEnd, NULL);
-		printf("Time taken: %ld us\n", (long)((avgEnd.tv_sec - avgStart.tv_sec) * 1000000 + avgEnd.tv_usec - avgStart.tv_usec));
+		gettimeofday(&e, NULL);
+		printf("Time taken: %ld us\n", (long)((e.tv_sec - s.tv_sec) * 1000000 + e.tv_usec - s.tv_usec));
 		printf("Matrix (A) Avarage = %d\n", E);
 		exit(EXIT_SUCCESS);
 	}
@@ -425,28 +499,26 @@ int main(int ac, char **av) {
 			printf("Error: can't open file \"b_avarage_result.txt\"\n");
 			exit(EXIT_FAILURE);
 		}
+		gettimeofday(&s, NULL);
+		int E = avarage(&B);
+		gettimeofday(&e, NULL);
 		dup2(fd, STDOUT_FILENO);
 		close(fd);
-		struct timeval avgStart;
-		gettimeofday(&avgStart, NULL);
-		int E = avarage(&B);
-		struct timeval avgEnd;
-		gettimeofday(&avgEnd, NULL);
-		printf("Time taken: %ld us\n", (long)((avgEnd.tv_sec - avgStart.tv_sec) * 1000000 + avgEnd.tv_usec - avgStart.tv_usec));
+		printf("Time taken: %ld us\n", (long)((e.tv_sec - s.tv_sec) * 1000000 + e.tv_usec - s.tv_usec));
 		printf("Matrix (A) Avarage = %d\n", E);
 		exit(EXIT_SUCCESS);
 	}
 
 	// wait for all children to finish
 	waitForAllChildren();
-
-	// print results
-	printResults();
-
+	
 	// Stop Overall_Timer
 	gettimeofday(&end, NULL);
+	
+	// print results
+	printResults();
 	printf("Total time taken: %ld us\n", (long)((end.tv_sec - start.tv_sec) * 1000000 + end.tv_usec - start.tv_usec));
-
+	
 	freeMatrix(&A);
 	freeMatrix(&B);
 
