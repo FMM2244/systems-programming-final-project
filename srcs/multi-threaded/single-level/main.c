@@ -29,8 +29,8 @@ typedef struct matrix {
 /** =============================================================
  * GLOBAL VARIABLES HERE
  ** ========================================================== */
-volatile mtrx_t A;
-volatile mtrx_t B;
+mtrx_t A;
+mtrx_t B;
 
 /**
  * prints an error prompt based on the value passed as flag
@@ -181,9 +181,9 @@ int transposition(mtrx_t *A, mtrx_t *B) {
 /**
  * waits for all child processes spawned by the parent to exit
  */
-void waitForAllThreads(pthread_t *th) {
+void waitForAllThreads(pthread_t *th, int size) {
 
-	for (int i = 0; i < sizeof(th); i++)
+	for (int i = 0; i < size; i++)
 		pthread_join(th[i], NULL);
 }
 
@@ -387,22 +387,20 @@ int main(int ac, char **av) {
 	gettimeofday(&start, NULL);
 
 	// Matrix Multiplication
-	pthread_create(ths[0], NULL, multiplyControler, NULL);
+	pthread_create(&ths[0], NULL, multiplyControler, NULL);
 
 	// Matrix Transposition
-	char mtrx = 'A';
-	pthread_create(ths[1], NULL, transposeControler, &mtrx);
-	mtrx = 'B';
-	pthread_create(ths[2], NULL, transposeControler, &mtrx);
+	char mtrx_A = 'A';
+	char mtrx_B = 'B';
+	pthread_create(&ths[1], NULL, transposeControler, &mtrx_A);
+	pthread_create(&ths[2], NULL, transposeControler, &mtrx_B);
 
 	// Matrix Average
-	mtrx = 'A';
-	pthread_create(ths[3], NULL, avarageControler, &mtrx);
-	mtrx = 'B';
-	pthread_create(ths[4], NULL, avarageControler, &mtrx);
+	pthread_create(&ths[3], NULL, avarageControler, &mtrx_A);
+	pthread_create(&ths[4], NULL, avarageControler, &mtrx_B);
 
 	// wait for all children to finish
-	waitForAllThreads(ths);
+	waitForAllThreads(ths, 5);
 
 	// print results
 	printResults();
