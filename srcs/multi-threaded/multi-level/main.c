@@ -1,3 +1,15 @@
+/***
+ * 
+ * 
+ * HEADER COMMENT
+ * 
+ * 
+ */
+
+/** =============================================================
+ * INCLUDED LIBRARIES HERE
+ ** ========================================================== */
+
 # include <stdio.h>
 # include <stdlib.h>
 # include <unistd.h>
@@ -8,6 +20,12 @@
 # include <sys/wait.h>
 # include <sys/types.h>
 # include <strings.h>
+# include <pthread.h>
+
+/** =============================================================
+ * DEFINED STRUCTS HERE
+ ** =============================================================
+ */
 
 /**
  * a struct that holds a 2 dimentional array its rows and columns
@@ -18,11 +36,26 @@ typedef struct matrix {
 	int **mtrx;
 }	mtrx_t;
 
+typedef struct sub {
+	mtrx_t *dest;
+	mtrx_t *src;
+	int row_index;
+}	sub_t;
+
+/** =============================================================
+ * GLOBAL VARIABLES HERE
+ ** =============================================================
+ */
+
+mtrx_t A;
+mtrx_t B;
+
+pthread_mutex_t print_lock = PTHREAD_MUTEX_INITIALIZER;
+
 /**
  * prints an error prompt based on the value passed as flag
  */
 void handleError(int flag) {
-
 	switch (flag) {
 	case 0:
 		perror("malloc");
@@ -37,32 +70,20 @@ void handleError(int flag) {
 /**
  * waits for all child processes spawned by the parent to exit
  */
-void waitForAllChildren() {
+void waitForAllThreads(pthread_t *th, int size) {
 
-	pid_t pid;
-	int status;
-
-	while (1) {
-		pid = waitpid(-1, &status, 0);
-		if (pid == -1) {
-			if (errno == EINTR)
-				continue;
-			if (errno == ECHILD)
-				break;
-			perror("waitpid");
-			break;
-		}
-	}
+	for (int i = 0; i < size; i++)
+		pthread_join(th[i], NULL);
 }
 
 /**
  * prints the contents of a 2 dimentional matrix on the standerd output
  */
-void printMatrix(mtrx_t m) {
+void printMatrix(mtrx_t m, int fd) {
 	for (int i = 0; i < m.nb_rows; i++) {
 		for (int j = 0; j < m.nb_columns; j++)
-			printf("%d\t", m.mtrx[i][j]);
-		printf("\n");
+			dprintf(fd, "%d\t", m.mtrx[i][j]);
+		dprintf(fd, "\n");
 	}
 }
 
@@ -100,14 +121,40 @@ void generateRandomMatrix(mtrx_t *res) {
 }
 
 /**
+ * 
+ */
+void *multiplySubRoutine(void *data) {
+
+	sub_t *con = (sub_t *)data;
+
+	for (int j = 0; j < con->dest->nb_columns; j++) {
+		con->dest->mtrx[con->row_index][j] = 0;
+		// multiply row of A by column of B
+		for (int k = 0; k < A.nb_columns; k++) {
+			con->dest->mtrx[con->row_index][j] += A.mtrx[con->row_index][k] * B.mtrx[k][j];
+		}
+	}
+}
+
+void *transposeSubRoutine(void *data) {
+
+	sub_t *con = (sub_t *)data;
+
+	for (int j = 0; j < con->dest->nb_columns; j++)
+		con->dest->mtrx[con->row_index][j] = con->src->mtrx[j][con->row_index];
+
+	return NULL;
+}
+
+/**
  * multiplies matrix A by B and stores the result in matrix C
  */
-int multiply(mtrx_t *A, mtrx_t *B, mtrx_t *C) {
+int multiply(mtrx_t *C) {
 
-	C->nb_rows = A->nb_rows;
-	C->nb_columns = B->nb_columns;
+	C->nb_rows = A.nb_rows;
+	C->nb_columns = B.nb_columns;
 
-	if (A->nb_columns != B->nb_rows)
+	if (A.nb_columns != B.nb_rows)
 		return 1;
 
 	C->mtrx = malloc(C->nb_rows * sizeof(int *));
@@ -125,159 +172,134 @@ int multiply(mtrx_t *A, mtrx_t *B, mtrx_t *C) {
 		}
 	}
 
-	int read_fds[C->nb_rows];
-	bzero(read_fds, sizeof(read_fds));
+	pthread_t th[C->nb_rows];
+	sub_t con[C->nb_rows];
 
 	for (int i = 0; i < C->nb_rows; i++) {
-		int fds[2];
-		if (pipe(fds) == -1) {
-			perror("pipe");
-			freeMatrix(A);
-			freeMatrix(B);
-			freeMatrix(C);
-			waitForAllChildren();
-			exit(EXIT_FAILURE);
-		}
-		int pid = fork();
-		if (pid == 0) {
-			close(fds[0]);
-			dup2(fds[1], STDOUT_FILENO);
-			for (int j = 0; j < C->nb_columns; j++) {
-				C->mtrx[i][j] = 0;
-				// multiply row of A by columns of B
-				for (int k = 0; k < A->nb_columns; k++)
-					C->mtrx[i][j] += A->mtrx[i][k] * B->mtrx[k][j];
-			}
-			write(fds[1], C->mtrx[i], sizeof(int) * C->nb_columns);
-			freeMatrix(A);
-			freeMatrix(B);
-			freeMatrix(C);
-			for (int i = 0; read_fds[i] != 0; i++)
-				close(read_fds[i]);
-			exit(EXIT_SUCCESS);
-		}
-		close(fds[1]);
-		read_fds[i] = fds[0];
+		con[i].dest = C;
+		con[i].row_index = i;
+		pthread_create(&th[i], NULL, multiplySubRoutine, &con[i]);
 	}
-
-	waitForAllChildren();
-
-	for (int i = 0; i < C->nb_rows; i++) {
-		read(read_fds[i], C->mtrx[i], sizeof(int) * C->nb_columns);
-		close(read_fds[i]);
-	}
+	
+	waitForAllThreads(th, C->nb_rows);
 
 	return 0;
 }
 
 /**
+ * Sub-routine for calculateing the avarage
+ */
+void *avarageSubRoutine(void *data) {
+
+	sub_t *con = (sub_t *)data;
+	int *res = malloc(sizeof(*res));
+	if (res == NULL)
+		return NULL;
+	*res = 0;
+
+	for (unsigned int j = 0; j < con->dest->nb_columns; j++)
+		*res += con->dest->mtrx[con->row_index][j];
+	return res;	
+}
+
+/**
  * calculate the avarage of matrix m
  */
-int avarage(mtrx_t *m) {
+int avarage(char mtrx) {
 
 	long res = 0;
 
-	int read_fds[m->nb_rows];
-	bzero(read_fds, sizeof(read_fds));
+	if (mtrx == 'A') {
+		pthread_t th[A.nb_rows];
+		sub_t con[A.nb_rows];
+		int arr[A.nb_rows];
 
-	for (int i = 0; i < m->nb_rows; i++) {
-		int fds[2];
-		if (pipe(fds) == -1) {
-			perror("pipe");
-			freeMatrix(m);
-			waitForAllChildren();
-			exit(EXIT_FAILURE);
+		for (int i = 0; i < A.nb_rows; i++) {
+			con[i].dest = &A;
+			con[i].row_index = i;
+			pthread_create(&th[i], NULL, avarageSubRoutine, &con[i]);
 		}
-		int pid = fork();
-		if (pid == 0) {
-			close(fds[0]);
-			dup2(fds[1], STDOUT_FILENO);
-			for (int j = 0; j < m->nb_columns; j++)
-				res += m->mtrx[i][j];
-			write(fds[1], &res, sizeof(int));
-			freeMatrix(m);
-			for (int i = 0; read_fds[i] != 0; i++)
-				close(read_fds[i]);
-			exit(EXIT_SUCCESS);
+
+		for (int i = 0; i < A.nb_rows; i++) {
+			void *thread_result;
+			pthread_join(th[i], &thread_result);
+			arr[i] = *(int *)thread_result;
+			free(thread_result);
 		}
-		close(fds[1]);
-		read_fds[i] = fds[0];
+
+		for (int i = 0; i < A.nb_rows; i++)
+			res += arr[i];
+
+		return (int)(res / (A.nb_rows * A.nb_columns));
+	}
+	else {
+		pthread_t th[B.nb_rows];
+		sub_t con[B.nb_rows];
+		int arr[B.nb_rows];
+
+		for (int i = 0; i < B.nb_rows; i++) {
+			con[i].dest = &B;
+			con[i].row_index = i;
+			pthread_create(&th[i], NULL, avarageSubRoutine, &con[i]);
+		}
+
+		for (int i = 0; i < B.nb_rows; i++) {
+			void *thread_result;
+			pthread_join(th[i], &thread_result);
+			arr[i] = *(int *)thread_result;
+			free(thread_result);
+		}
+
+		for (int i = 0; i < B.nb_rows; i++)
+			res += arr[i];
+
+		return (int)(res / (B.nb_rows * B.nb_columns));
 	}
 
-	waitForAllChildren();
-
-	for (int i = 0; i < m->nb_rows; i++) {
-		int tmp;
-		read(read_fds[i], &tmp, sizeof(int));
-		res += tmp;
-		close(read_fds[i]);
-	}
-
-	return (int)(res / (m->nb_rows * m->nb_columns));
+	return res;
 }
 
 /**
  * transposis matrix A and stores the output in matrix B
  */
-int transposition(mtrx_t *A, mtrx_t *B) {
-
-	B->nb_rows = A->nb_columns;
-	B->nb_columns = A->nb_rows;
-
-	B->mtrx = malloc(B->nb_rows * sizeof(int *));
-	if (B->mtrx == NULL) {
-		printf("Error: Can't Transpose Matrix\n");
-		return 1;
+int transposition(char mtrx, mtrx_t *C) {
+	if (mtrx == 'A') {
+		C->nb_rows = A.nb_columns;
+		C->nb_columns = A.nb_rows;
+	}
+	else {
+		C->nb_rows = B.nb_columns;
+		C->nb_columns = B.nb_rows;
 	}
 
-	for (int i = 0; i < B->nb_rows; i++) {
-		B->mtrx[i] = malloc(B->nb_columns * sizeof(int));
+	C->mtrx = malloc(C->nb_rows * sizeof(int *));
+	if (C->mtrx == NULL)
+		return 1;
 
-		if (B->mtrx[i] == NULL) {
+	for (int i = 0; i < C->nb_rows; i++) {
+		C->mtrx[i] = malloc(C->nb_columns * sizeof(int));
+
+		if (C->mtrx[i] == NULL) {
 			for (int j = 0; j < i; j++)
-				free(B->mtrx[j]);
-			free(B->mtrx);
-			printf("Error: Can't Transpose Matrix\n");
+				free(C->mtrx[j]);
+			free(C->mtrx);
 			return 1;
 		}
 	}
 
-	int read_fds[B->nb_rows];
-	bzero(read_fds, sizeof(read_fds));
+	pthread_t th[C->nb_rows];
+	sub_t con[C->nb_rows];
+	mtrx_t *src = (mtrx == 'A') ? &A : &B;
 
-	for (int i = 0; i < B->nb_rows; i++) {
-		int fds[2];
-		if (pipe(fds) == -1) {
-			perror("pipe");
-			freeMatrix(A);
-			freeMatrix(B);
-			waitForAllChildren();
-			exit(EXIT_FAILURE);
-		}
-		int pid = fork();
-		if (pid == 0) {
-			close(fds[0]);
-			dup2(fds[1], STDOUT_FILENO);
-			for (int j = 0; j < B->nb_columns; j++)
-				B->mtrx[i][j] = A->mtrx[j][i];
-			write(fds[1], B->mtrx[i], sizeof(int) * B->nb_columns);
-			freeMatrix(A);
-			freeMatrix(B);
-			for (int i = 0; read_fds[i] != 0; i++)
-				close(read_fds[i]);
-			exit(EXIT_SUCCESS);
-		}
-		close(fds[1]);
-		read_fds[i] = fds[0];
+	for (int i = 0; i < C->nb_rows; i++) {
+		con[i].dest = C;
+		con[i].src = src;
+		con[i].row_index = i;
+		pthread_create(&th[i], NULL, transposeSubRoutine, &con[i]);
 	}
 
-	waitForAllChildren();
-
-	for (int i = 0; i < B->nb_rows; i++) {
-		read(read_fds[i], B->mtrx[i], sizeof(int) * B->nb_columns);
-		close(read_fds[i]);
-	}
-
+	waitForAllThreads(th, C->nb_rows);
+	
 	return 0;
 }
 
@@ -303,6 +325,127 @@ void printResults() {
 }
 
 /**
+ * multiplication routine
+ */
+void *multiplyControler(void *data) {
+
+	pthread_mutex_lock(&print_lock);
+	printf("Performing Matrix Multiplication on Matrices (A) & (B)\n");
+	pthread_mutex_unlock(&print_lock);	int fd = open("a_b_multiplication_result.txt", O_WRONLY | O_CREAT | O_TRUNC, 0664);
+	if (fd == -1) {
+		pthread_mutex_lock(&print_lock);
+		printf("Error: can't open file \"a_b_multiplication_result.txt\"\n");
+		pthread_mutex_unlock(&print_lock);
+		return NULL;
+	}
+	struct timeval multiStart;
+	gettimeofday(&multiStart, NULL);
+	mtrx_t C;
+	int flag = multiply(&C);
+	struct timeval multiEnd;
+	gettimeofday(&multiEnd, NULL);
+	dprintf(fd, "Time taken: %ld us\n", (long)((multiEnd.tv_sec - multiStart.tv_sec) * 1000000 + multiEnd.tv_usec - multiStart.tv_usec));
+	if (!flag) {
+		dprintf(fd, "Result Matrix:\n\n");
+		printMatrix(C, fd);
+		freeMatrix(&C);
+	}
+	else
+		dprintf(fd, "Error: Can't Multiply Matrices\n");
+	close(fd);
+}
+
+/**
+ * transposition routine
+ */
+void *transposeControler(void *data) {
+
+	char mtrx = *(char *)data;
+	int fd = 0;
+	if (mtrx == 'A') {
+		pthread_mutex_lock(&print_lock);
+		printf("Performing Matrix Transposition on Matrix (A)\n");
+		pthread_mutex_unlock(&print_lock);
+		fd = open("a_transpose_result.txt", O_WRONLY | O_CREAT | O_TRUNC, 0664);
+		if (fd == -1) {
+			pthread_mutex_lock(&print_lock);
+			printf("Error: can't open file \"a_transpose_result.txt\"\n");
+			pthread_mutex_unlock(&print_lock);
+			return NULL;
+		}
+	}
+	else {
+		pthread_mutex_lock(&print_lock);
+		printf("Performing Matrix Transposition on Matrix (B)\n");
+		pthread_mutex_unlock(&print_lock);
+		fd = open("b_transpose_result.txt", O_WRONLY | O_CREAT | O_TRUNC, 0664);
+		if (fd == -1) {
+			pthread_mutex_lock(&print_lock);
+			printf("Error: can't open file \"b_transpose_result.txt\"\n");
+			pthread_mutex_unlock(&print_lock);
+			return NULL;
+		}
+	}
+	struct timeval tranStart;
+	gettimeofday(&tranStart, NULL);
+	mtrx_t D;
+	bzero(&D, sizeof(mtrx_t *));
+	int flag = transposition(mtrx, &D);
+	struct timeval tranEnd;
+	gettimeofday(&tranEnd, NULL);
+	dprintf(fd, "Time taken: %ld us\n", (long)((tranEnd.tv_sec - tranStart.tv_sec) * 1000000 + tranEnd.tv_usec - tranStart.tv_usec));
+	if (!flag) {
+		dprintf(fd, "Result Matrix:\n\n");
+		printMatrix(D, fd);
+		freeMatrix(&D);
+	}
+	else
+		printf("Error: Can't Transpose Matrix\n");
+	close(fd);
+}
+
+/**
+ * avarage routine
+ */
+void *avarageControler(void *data) {
+
+	char mtrx = *(char *)data;
+	int fd = 0;
+	if (mtrx == 'A') {
+		pthread_mutex_lock(&print_lock);
+		printf("Finding Matrix Avarage of Matrix (A)\n");
+		pthread_mutex_unlock(&print_lock);
+		fd = open("a_avarage_result.txt", O_WRONLY | O_CREAT | O_TRUNC, 0664);
+		if (fd == -1) {
+			pthread_mutex_lock(&print_lock);
+			printf("Error: can't open file \"a_avarage_result.txt\"\n");
+			pthread_mutex_unlock(&print_lock);
+			return NULL;
+		}
+	}
+	else {
+		pthread_mutex_lock(&print_lock);
+		printf("Finding Matrix Avarage of Matrix (B)\n");
+		pthread_mutex_unlock(&print_lock);
+		fd = open("b_avarage_result.txt", O_WRONLY | O_CREAT | O_TRUNC, 0664);
+		if (fd == -1) {
+			pthread_mutex_lock(&print_lock);
+			printf("Error: can't open file \"b_avarage_result.txt\"\n");
+			pthread_mutex_unlock(&print_lock);
+			return NULL;
+		}
+	}
+	struct timeval avgStart;
+	gettimeofday(&avgStart, NULL);
+	int E = avarage(mtrx);
+	struct timeval avgEnd;
+	gettimeofday(&avgEnd, NULL);
+	dprintf(fd, "Time taken: %ld us\n", (long)((avgEnd.tv_sec - avgStart.tv_sec) * 1000000 + avgEnd.tv_usec - avgStart.tv_usec));
+	dprintf(fd, "Matrix (A) Avarage = %d\n", E);
+	close(fd);
+}
+
+/**
  * main function
  * everything starts here ...
  */
@@ -310,14 +453,10 @@ int main(int ac, char **av) {
 
 	srand(time(NULL));
 
-	mtrx_t A;
-	mtrx_t B;
-	mtrx_t C;
-	int pids[5];
-	int fd;
-	int flag;
-	struct timeval s, e;
+	pthread_t ths[5];
 
+	bzero(&A, sizeof(mtrx_t *));
+	bzero(&B, sizeof(mtrx_t *));
 	generateRandomMatrix(&A);
 	generateRandomMatrix(&B);
 
@@ -325,142 +464,44 @@ int main(int ac, char **av) {
 	// comment this part if you don't the output to be too long
 	printf("Matrix (A) rows: %u, columns: %u\n", A.nb_rows, A.nb_columns);
 	printf("==================================================================\n");
-	printMatrix(A);
+	printMatrix(A, 0);
 	printf("Matrix (B) rows: %u, columns: %u\n", B.nb_rows, B.nb_columns);
 	printf("==================================================================\n");
-	printMatrix(B);
+	printMatrix(B, 0);
 
 	printf("==================================================================\n");
 	printf("performing operations...\nplease wait momentarally :)\n");
+	printf("==================================================================\n");
 
 	// Start Overall_Timer
-	struct timeval start, end;
+
+	struct timeval start;
 	gettimeofday(&start, NULL);
 
 	// Matrix Multiplication
-	pids[0] = fork();
-	if (pids[0] == 0) {
-		// printf("\n==================================================================\n");
-		fd = open("a_b_multiplication_result.txt", O_WRONLY | O_CREAT | O_TRUNC, 0664);
-		if (fd == -1) {
-			printf("Error: can't open file \"a_b_multiplication_result.txt\"\n");
-			exit(EXIT_FAILURE);
-		}
-		struct timeval s, e;
-		gettimeofday(&s, NULL);
-		flag = multiply(&A, &B, &C);
-		gettimeofday(&e, NULL);
-		dup2(fd, STDOUT_FILENO);
-		close(fd);
-		printf("Time taken: %ld us\n", (long)((e.tv_sec - s.tv_sec) * 1000000 + e.tv_usec - s.tv_usec));
-		if (!flag) {
-			printf("Result Matrix:\n\n");
-			printMatrix(C);
-			freeMatrix(&C);
-		}
-		else
-			printf("Error: Can't Multiply Matrices\n");
-		freeMatrix(&A);
-		freeMatrix(&B);
-		exit(EXIT_SUCCESS);
-	}
+	pthread_create(&ths[0], NULL, multiplyControler, NULL);
 
 	// Matrix Transposition
-	pids[1] = fork();
-	if (pids[1] == 0) {
-		// printf("\n==================================================================\n");
-		// printf("\nPerforming Matrix Transposition on Matrix (A)\n");
-		fd = open("a_transpose_result.txt", O_WRONLY | O_CREAT | O_TRUNC, 0664);
-		if (fd == -1) {
-			printf("Error: can't open file \"a_transpose_result.txt\"\n");
-			exit(EXIT_FAILURE);
-		}
-		gettimeofday(&s, NULL);
-		flag = transposition(&A, &C);
-		gettimeofday(&e, NULL);
-		dup2(fd, STDOUT_FILENO);
-		close(fd);
-		printf("Time taken: %ld us\n", (long)((e.tv_sec - s.tv_sec) * 1000000 + e.tv_usec - s.tv_usec));
-		if (!flag) {
-			printf("Result Matrix:\n\n");
-			printMatrix(C);
-			freeMatrix(&C);
-		}
-		exit(EXIT_SUCCESS);
-	}
-
-	pids[2] = fork();
-	if (pids[2] == 0) {	
-		// printf("\n==================================================================\n");
-		// printf("\nPerforming Matrix Transposition on Matrix (B)\n");
-		fd = open("b_transpose_result.txt", O_WRONLY | O_CREAT | O_TRUNC, 0664);
-		if (fd == -1) {
-			printf("Error: can't open file \"b_transpose_result.txt\"\n");
-			exit(EXIT_FAILURE);
-		}
-		gettimeofday(&s, NULL);
-		flag = transposition(&B, &C);
-		gettimeofday(&e, NULL);
-		dup2(fd, STDOUT_FILENO);
-		close(fd);
-		printf("Time taken: %ld us\n", (long)((e.tv_sec - s.tv_sec) * 1000000 + e.tv_usec - s.tv_usec));
-		if (!flag) {
-			printf("Result Matrix:\n\n");
-			printMatrix(C);
-			freeMatrix(&C);
-		}
-		exit(EXIT_SUCCESS);
-	}
+	char mtrx_A = 'A';
+	char mtrx_B = 'B';
+	pthread_create(&ths[1], NULL, transposeControler, &mtrx_A);
+	pthread_create(&ths[2], NULL, transposeControler, &mtrx_B);
 
 	// Matrix Average
-	pids[3] = fork();
-	if (pids[3] == 0) {
-		// printf("\n==================================================================\n");
-		// printf("\nPerforming Avarage Calculation on Matrix (A)\n");
-		fd = open("a_avarage_result.txt", O_WRONLY | O_CREAT | O_TRUNC, 0664);
-		if (fd == -1) {
-			printf("Error: can't open file \"a_avarage_result.txt\"\n");
-			exit(EXIT_FAILURE);
-		}
-		gettimeofday(&s, NULL);
-		int E = avarage(&A);
-		dup2(fd, STDOUT_FILENO);
-		close(fd);
-		gettimeofday(&e, NULL);
-		printf("Time taken: %ld us\n", (long)((e.tv_sec - s.tv_sec) * 1000000 + e.tv_usec - s.tv_usec));
-		printf("Matrix (A) Avarage = %d\n", E);
-		exit(EXIT_SUCCESS);
-	}
-
-	pids[4] = fork();
-	if (pids[4] == 0) {
-		// printf("\n==================================================================\n");
-		// printf("\nPerforming Avarage Calculation on Matrix (B)\n");
-		int fd = open("b_avarage_result.txt", O_WRONLY | O_CREAT | O_TRUNC, 0664);
-		if (fd == -1) {
-			printf("Error: can't open file \"b_avarage_result.txt\"\n");
-			exit(EXIT_FAILURE);
-		}
-		gettimeofday(&s, NULL);
-		int E = avarage(&B);
-		gettimeofday(&e, NULL);
-		dup2(fd, STDOUT_FILENO);
-		close(fd);
-		printf("Time taken: %ld us\n", (long)((e.tv_sec - s.tv_sec) * 1000000 + e.tv_usec - s.tv_usec));
-		printf("Matrix (A) Avarage = %d\n", E);
-		exit(EXIT_SUCCESS);
-	}
+	pthread_create(&ths[3], NULL, avarageControler, &mtrx_A);
+	pthread_create(&ths[4], NULL, avarageControler, &mtrx_B);
 
 	// wait for all children to finish
-	waitForAllChildren();
-	
-	// Stop Overall_Timer
-	gettimeofday(&end, NULL);
-	
+	waitForAllThreads(ths, 5);
+
 	// print results
 	printResults();
+
+	// Stop Overall_Timer
+	struct timeval end;
+	gettimeofday(&end, NULL);
 	printf("Total time taken: %ld us\n", (long)((end.tv_sec - start.tv_sec) * 1000000 + end.tv_usec - start.tv_usec));
-	
+
 	freeMatrix(&A);
 	freeMatrix(&B);
 
