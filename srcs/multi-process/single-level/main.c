@@ -295,7 +295,7 @@ int main(int ac, char **av) {
 	pids[0] = fork();
 	if (pids[0] == 0) {
 		// printf("\n==================================================================\n");
-		int fd = open("a_b_multiplication_result.txt", O_WRONLY | O_CREAT, 0664);
+		int fd = open("a_b_multiplication_result.txt", O_WRONLY | O_CREAT | O_TRUNC, 0664);
 		if (fd == -1) {
 			printf("Error: can't open file \"a_b_multiplication_result.txt\"\n");
 			exit(EXIT_FAILURE);
@@ -322,7 +322,7 @@ int main(int ac, char **av) {
 	if (pids[1] == 0) {
 		// printf("\n==================================================================\n");
 		// printf("\nPerforming Matrix Transposition on Matrix (A)\n");
-		int fd = open("a_transpose_result.txt", O_WRONLY | O_CREAT, 0664);
+		int fd = open("a_transpose_result.txt", O_WRONLY | O_CREAT | O_TRUNC, 0664);
 		if (fd == -1) {
 			printf("Error: can't open file \"a_b_multiplication_result.txt\"\n");
 			exit(EXIT_FAILURE);
@@ -349,7 +349,7 @@ int main(int ac, char **av) {
 	if (pids[2] == 0) {	
 		// printf("\n==================================================================\n");
 		// printf("\nPerforming Matrix Transposition on Matrix (B)\n");
-		int fd = open("b_transpose_result.txt", O_WRONLY | O_CREAT, 0664);
+		int fd = open("b_transpose_result.txt", O_WRONLY | O_CREAT | O_TRUNC, 0664);
 		if (fd == -1) {
 			printf("Error: can't open file \"a_b_multiplication_result.txt\"\n");
 			exit(EXIT_FAILURE);
@@ -377,7 +377,7 @@ int main(int ac, char **av) {
 	if (pids[3] == 0) {
 		// printf("\n==================================================================\n");
 		// printf("\nPerforming Avarage Calculation on Matrix (A)\n");
-		int fd = open("a_avarage_result.txt", O_WRONLY | O_CREAT, 0664);
+		int fd = open("a_avarage_result.txt", O_WRONLY | O_CREAT | O_TRUNC, 0664);
 		if (fd == -1) {
 			printf("Error: can't open file \"a_b_multiplication_result.txt\"\n");
 			exit(EXIT_FAILURE);
@@ -398,7 +398,7 @@ int main(int ac, char **av) {
 	if (pids[4] == 0) {
 		// printf("\n==================================================================\n");
 		// printf("\nPerforming Avarage Calculation on Matrix (B)\n");
-		int fd = open("b_avarage_result.txt", O_WRONLY | O_CREAT, 0664);
+		int fd = open("b_avarage_result.txt", O_WRONLY | O_CREAT | O_TRUNC, 0664);
 		if (fd == -1) {
 			printf("Error: can't open file \"a_b_multiplication_result.txt\"\n");
 			exit(EXIT_FAILURE);

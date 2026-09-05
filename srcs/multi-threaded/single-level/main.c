@@ -1,3 +1,15 @@
+/***
+ * 
+ * 
+ * HEADER COMMENT
+ * 
+ * 
+ */
+
+/** =============================================================
+ * INCLUDED LIBRARIES HERE
+ ** ========================================================== */
+
 # include <stdio.h>
 # include <stdlib.h>
 # include <unistd.h>
@@ -10,6 +22,10 @@
 # include <strings.h>
 # include <pthread.h>
 
+/** =============================================================
+ * DEFINED STRUCTS HERE
+ ** ========================================================== */
+
 /**
  * a struct that holds a 2 dimentional array its rows and columns
  */
@@ -19,18 +35,14 @@ typedef struct matrix {
 	int **mtrx;
 }	mtrx_t;
 
-/**
- * holds anything in it
- */
-// typedef struct container {
-// 	void *arr;
-// }	container_t;
-
 /** =============================================================
  * GLOBAL VARIABLES HERE
  ** ========================================================== */
+
 mtrx_t A;
 mtrx_t B;
+
+pthread_mutex_t print_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /**
  * prints an error prompt based on the value passed as flag
@@ -99,16 +111,12 @@ int multiply(mtrx_t *A, mtrx_t *B, mtrx_t *C) {
 	C->nb_rows = A->nb_rows;
 	C->nb_columns = B->nb_columns;
 
-	if (A->nb_columns != B->nb_rows) {
-		printf("Error: Can't Multiply Matrices\n");
+	if (A->nb_columns != B->nb_rows)
 		return 1;
-	}
 
 	C->mtrx = malloc(C->nb_rows * sizeof(int *));
-	if (C->mtrx == NULL) {
-		printf("Error: Can't Multiply Matrices\n");
+	if (C->mtrx == NULL)
 		return 1;
-	}
 
 	for (int i = 0; i < C->nb_rows; i++) {
 		C->mtrx[i] = malloc(C->nb_columns * sizeof(int));
@@ -154,10 +162,8 @@ int transposition(mtrx_t *A, mtrx_t *B) {
 	B->nb_columns = A->nb_rows;
 
 	B->mtrx = malloc(B->nb_rows * sizeof(int *));
-	if (B->mtrx == NULL) {
-		printf("Error: Can't Transpose Matrix\n");
+	if (B->mtrx == NULL)
 		return 1;
-	}
 
 	for (int i = 0; i < B->nb_rows; i++) {
 		B->mtrx[i] = malloc(B->nb_columns * sizeof(int));
@@ -166,7 +172,6 @@ int transposition(mtrx_t *A, mtrx_t *B) {
 			for (int j = 0; j < i; j++)
 				free(B->mtrx[j]);
 			free(B->mtrx);
-			printf("Error: Can't Transpose Matrix\n");
 			return 1;
 		}
 	}
@@ -191,82 +196,35 @@ void waitForAllThreads(pthread_t *th, int size) {
  * prints the output text files on the terminal by executing the cat command
  */
 void printResults() {
-	int status;
-	char *const multi_argv[] = {"/usr/bin/cat", "a_b_multiplication_result.txt", NULL};
-	char *const a_transpose_argv[] = {"/usr/bin/cat", "a_transpose_result.txt", NULL};
-	char *const b_transpose_argv[] = {"/usr/bin/cat", "b_transpose_result.txt", NULL};
-	char *const a_avg_argv[] = {"/usr/bin/cat", "a_avarage_result.txt", NULL};
-	char *const b_avg_argv[] = {"/usr/bin/cat", "b_avarage_result.txt", NULL};
-
-	int pid = fork();
-	if (pid == 0) {
-		printf("==================================================================\n");
-		printf("Matrix Multiplication on (A) & (B) result: \n");
-		execvp(multi_argv[0], multi_argv);
-		perror("execvp");
-		exit(EXIT_FAILURE);
-	}
-	wait(&status);
-	if (status)
-		printf("Error: couldn't print file\ngo to a_b_multiplication_result.txt and check it yourself\n");
-
-	pid = fork();
-	if (pid == 0) {
-		printf("==================================================================\n");
-		printf("Matrix Transposition on (A) result: \n");
-		execvp(a_transpose_argv[0], a_transpose_argv);
-		perror("execvp");
-		exit(EXIT_FAILURE);
-	}
-	wait(&status);
-	if (status)
-		printf("Error: couldn't print file\ngo to a_transpose_result.txt and check it yourself\n");
-
-	pid = fork();
-	if (pid == 0) {
-		printf("==================================================================\n");
-		printf("Matrix Transposition on (B) result: \n");
-		execvp(b_transpose_argv[0], b_transpose_argv);
-		perror("execvp");
-		exit(EXIT_FAILURE);
-	}
-	wait(&status);
-	if (status)
-		printf("Error: couldn't print file\ngo to b_transpose_result.txt and check it yourself\n");
-
-	pid = fork();
-	if (pid == 0) {
-		printf("==================================================================\n");
-		printf("Matrix Avarage of (A) result: \n");
-		execvp(a_avg_argv[0], a_avg_argv);
-		perror("execvp");
-		exit(EXIT_FAILURE);
-	}
-	wait(&status);
-	if (status)
-		printf("Error: couldn't print file\ngo to a_avarage_result.txt and check it yourself\n");
-
-	pid = fork();
-	if (pid == 0) {
-		printf("==================================================================\n");
-		printf("Matrix Avarage of (B) result: \n");
-		execvp(b_avg_argv[0], b_avg_argv);
-		perror("execvp");
-		exit(EXIT_FAILURE);
-	}
-	wait(&status);
-	if (status)
-		printf("Error: couldn't print file\ngo to b_avarage_result.txt and check it yourself\n");
+	printf("==================================================================\n");
+	printf("Matrix Multiplication on (A) & (B) result: \n");
+	system("cat a_b_multiplication_result.txt");
+	printf("==================================================================\n");
+	printf("Matrix Transposition on (A) result: \n");
+	system("cat a_transpose_result.txt");
+	printf("==================================================================\n");
+	printf("Matrix Transposition on (B) result: \n");
+	system("cat b_transpose_result.txt");
+	printf("==================================================================\n");
+	printf("Matrix Avarage of (A) result: \n");
+	system("cat a_avarage_result.txt");
+	printf("==================================================================\n");
+	printf("Matrix Avarage of (B) result: \n");
+	system("cat b_avarage_result.txt");
 }
 
 /**
- * 
+ * multiplication routine
  */
 void *multiplyControler(void *data) {
 
-	int fd = open("a_b_multiplication_result.txt", O_WRONLY | O_CREAT, 0664);
+	pthread_mutex_lock(&print_lock);
+	printf("Performing Matrix Multiplication on Matrices (A) & (B)\n");
+	pthread_mutex_unlock(&print_lock);	int fd = open("a_b_multiplication_result.txt", O_WRONLY | O_CREAT | O_TRUNC, 0664);
 	if (fd == -1) {
+		pthread_mutex_lock(&print_lock);
 		printf("Error: can't open file \"a_b_multiplication_result.txt\"\n");
+		pthread_mutex_unlock(&print_lock);
 		return NULL;
 	}
 	struct timeval multiStart;
@@ -281,28 +239,39 @@ void *multiplyControler(void *data) {
 		printMatrix(C, fd);
 		freeMatrix(&C);
 	}
+	else
+		dprintf(fd, "Error: Can't Multiply Matrices\n");
+	close(fd);
 }
 
 /**
- * 
+ * transposition routine
  */
 void *transposeControler(void *data) {
 
 	char mtrx = *(char *)data;
 	int fd = 0;
 	if (mtrx == 'A') {
-		printf("\nPerforming Matrix Transposition on Matrix (A)\n");
-		fd = open("a_transpose_result.txt", O_WRONLY | O_CREAT, 0664);
+		pthread_mutex_lock(&print_lock);
+		printf("Performing Matrix Transposition on Matrix (A)\n");
+		pthread_mutex_unlock(&print_lock);
+		fd = open("a_transpose_result.txt", O_WRONLY | O_CREAT | O_TRUNC, 0664);
 		if (fd == -1) {
-			printf("Error: can't open file \"b_transpose_result.txt\"\n");
+			pthread_mutex_lock(&print_lock);
+			printf("Error: can't open file \"a_transpose_result.txt\"\n");
+			pthread_mutex_unlock(&print_lock);
 			return NULL;
 		}
 	}
 	else {
-		printf("\nPerforming Matrix Transposition on Matrix (B)\n");
-		int fd = open("b_transpose_result.txt", O_WRONLY | O_CREAT, 0664);
+		pthread_mutex_lock(&print_lock);
+		printf("Performing Matrix Transposition on Matrix (B)\n");
+		pthread_mutex_unlock(&print_lock);
+		fd = open("b_transpose_result.txt", O_WRONLY | O_CREAT | O_TRUNC, 0664);
 		if (fd == -1) {
+			pthread_mutex_lock(&print_lock);
 			printf("Error: can't open file \"b_transpose_result.txt\"\n");
+			pthread_mutex_unlock(&print_lock);
 			return NULL;
 		}
 	}
@@ -319,28 +288,39 @@ void *transposeControler(void *data) {
 		printMatrix(D, fd);
 		freeMatrix(&D);
 	}
+	else
+		printf("Error: Can't Transpose Matrix\n");
+	close(fd);
 }
 
 /**
- * 
+ * avarage routine
  */
 void *avarageControler(void *data) {
 
 	char mtrx = *(char *)data;
 	int fd = 0;
 	if (mtrx == 'A') {
-		printf("\nFinding Matrix Avarage of Matrix (A)\n");
-		fd = open("b_avarage_result.txt", O_WRONLY | O_CREAT, 0664);
+		pthread_mutex_lock(&print_lock);
+		printf("Finding Matrix Avarage of Matrix (A)\n");
+		pthread_mutex_unlock(&print_lock);
+		fd = open("a_avarage_result.txt", O_WRONLY | O_CREAT | O_TRUNC, 0664);
 		if (fd == -1) {
-			printf("Error: can't open file \"b_avarage_result.txt\"\n");
+			pthread_mutex_lock(&print_lock);
+			printf("Error: can't open file \"a_avarage_result.txt\"\n");
+			pthread_mutex_unlock(&print_lock);
 			return NULL;
 		}
 	}
 	else {
-		printf("\nFinding Matrix Avarage of Matrix (b)\n");
-		fd = open("b_avarage_result.txt", O_WRONLY | O_CREAT, 0664);
+		pthread_mutex_lock(&print_lock);
+		printf("Finding Matrix Avarage of Matrix (B)\n");
+		pthread_mutex_unlock(&print_lock);
+		fd = open("b_avarage_result.txt", O_WRONLY | O_CREAT | O_TRUNC, 0664);
 		if (fd == -1) {
+			pthread_mutex_lock(&print_lock);
 			printf("Error: can't open file \"b_avarage_result.txt\"\n");
+			pthread_mutex_unlock(&print_lock);
 			return NULL;
 		}
 	}
@@ -351,6 +331,7 @@ void *avarageControler(void *data) {
 	gettimeofday(&avgEnd, NULL);
 	dprintf(fd, "Time taken: %ld us\n", (long)((avgEnd.tv_sec - avgStart.tv_sec) * 1000000 + avgEnd.tv_usec - avgStart.tv_usec));
 	dprintf(fd, "Matrix (A) Avarage = %d\n", E);
+	close(fd);
 }
 
 /**
