@@ -8,6 +8,7 @@
 # include <sys/wait.h>
 # include <sys/types.h>
 # include <strings.h>
+# include <string.h>
 
 /**
  * a struct that holds a 2 dimentional array its rows and columns
@@ -17,7 +18,46 @@ typedef struct matrix {
 	unsigned int nb_columns;
 	int **mtrx;
 }	mtrx_t;
+typedef struct row_result {
+	long row_exec_time_us;
+	int values[];
+} row_result_t;
 
+ssize_t read_exact(int fd, void *buffer, size_t count) {
+	char *ptr = buffer;
+	size_t total = 0;
+
+	while (total < count) {
+		ssize_t bytes_read = read(fd, ptr + total, count - total);
+		if (bytes_read == -1) {
+			if (errno == EINTR)
+				continue;
+			return -1;
+		}
+		if (bytes_read == 0)
+			break;
+		total += (size_t)bytes_read;
+	}
+	return (ssize_t)total;
+}
+
+ssize_t write_all(int fd, const void *buffer, size_t count) {
+	const char *ptr = buffer;
+	size_t total = 0;
+
+	while (total < count) {
+		ssize_t bytes_written = write(fd, ptr + total, count - total);
+		if (bytes_written == -1) {
+			if (errno == EINTR)
+				continue;
+			return -1;
+		}
+		if (bytes_written == 0)
+			break;
+		total += (size_t)bytes_written;
+	}
+	return (ssize_t)total;
+}
 /**
  * prints an error prompt based on the value passed as flag
  */
@@ -142,13 +182,24 @@ int multiply(mtrx_t *A, mtrx_t *B, mtrx_t *C) {
 		if (pid == 0) {
 			close(fds[0]);
 			dup2(fds[1], STDOUT_FILENO);
+			struct timeval row_start, row_end;
+			gettimeofday(&row_start, NULL);
 			for (int j = 0; j < C->nb_columns; j++) {
 				C->mtrx[i][j] = 0;
 				// multiply row of A by columns of B
 				for (int k = 0; k < A->nb_columns; k++)
 					C->mtrx[i][j] += A->mtrx[i][k] * B->mtrx[k][j];
 			}
-			write(fds[1], C->mtrx[i], sizeof(int) * C->nb_columns);
+			gettimeofday(&row_end, NULL);
+			long row_exec_time_us = (long)((row_end.tv_sec - row_start.tv_sec) * 1000000 + row_end.tv_usec - row_start.tv_usec);
+			size_t row_payload_size = sizeof(row_result_t) + (sizeof(int) * C->nb_columns);
+			row_result_t *row_result = malloc(row_payload_size);
+			if (row_result == NULL)
+				exit(EXIT_FAILURE);
+			row_result->row_exec_time_us = row_exec_time_us;
+			memcpy(row_result->values, C->mtrx[i], sizeof(int) * C->nb_columns);
+			write_all(fds[1], row_result, row_payload_size);
+			free(row_result);
 			freeMatrix(A);
 			freeMatrix(B);
 			freeMatrix(C);
@@ -163,7 +214,22 @@ int multiply(mtrx_t *A, mtrx_t *B, mtrx_t *C) {
 	waitForAllChildren();
 
 	for (int i = 0; i < C->nb_rows; i++) {
-		read(read_fds[i], C->mtrx[i], sizeof(int) * C->nb_columns);
+		size_t row_payload_size = sizeof(row_result_t) + (sizeof(int) * C->nb_columns);
+		row_result_t *row_result = malloc(row_payload_size);
+		if (row_result == NULL) {
+			perror("malloc");
+			close(read_fds[i]);
+			return 1;
+		}
+		if (read_exact(read_fds[i], row_result, row_payload_size) != (ssize_t)row_payload_size) {
+			perror("read");
+			free(row_result);
+			close(read_fds[i]);
+			return 1;
+		}
+		memcpy(C->mtrx[i], row_result->values, sizeof(int) * C->nb_columns);
+		printf("Row %d execution time: %ld us\n", i + 1, row_result->row_exec_time_us);
+		free(row_result);
 		close(read_fds[i]);
 	}
 
