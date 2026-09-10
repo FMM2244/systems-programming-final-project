@@ -256,6 +256,8 @@ int multiply(mtrx_t *A, mtrx_t *B, mtrx_t *C) {
 		close(read_fds[i]);
 	}
 
+	addRandomRow(C);
+
 	return 0;
 }
 
@@ -366,8 +368,6 @@ int transposition(mtrx_t *A, mtrx_t *B) {
 		read(read_fds[i], B->mtrx[i], sizeof(int) * B->nb_columns);
 		close(read_fds[i]);
 	}
-
-	addRandomRow(B);
 
 	return 0;
 }
