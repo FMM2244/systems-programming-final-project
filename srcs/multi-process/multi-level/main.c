@@ -115,6 +115,24 @@ void freeMatrix(mtrx_t *m) {
 }
 
 /**
+ * appends one dynamically generated random row to the end of a matrix
+ */
+void addRandomRow(mtrx_t *matrix) {
+	int **new_rows = realloc(matrix->mtrx, (matrix->nb_rows + 1) * sizeof(*new_rows));
+	if (new_rows == NULL)
+		handleError(0);
+	matrix->mtrx = new_rows;
+	matrix->mtrx[matrix->nb_rows] = malloc(matrix->nb_columns * sizeof(*matrix->mtrx[matrix->nb_rows]));
+	if (matrix->mtrx[matrix->nb_rows] == NULL)
+		handleError(0);
+
+	for (unsigned int j = 0; j < matrix->nb_columns; j++)
+		matrix->mtrx[matrix->nb_rows][j] = (rand() % (50 - 3 + 1)) + 3;
+
+	matrix->nb_rows += 1;
+}
+
+/**
  * generates a matrix with random number of rows, columns and content
  */
 void generateRandomMatrix(mtrx_t *res) {
@@ -348,6 +366,8 @@ int transposition(mtrx_t *A, mtrx_t *B) {
 		read(read_fds[i], B->mtrx[i], sizeof(int) * B->nb_columns);
 		close(read_fds[i]);
 	}
+
+	addRandomRow(B);
 
 	return 0;
 }
