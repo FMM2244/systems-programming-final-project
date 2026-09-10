@@ -18,6 +18,7 @@ typedef struct matrix {
 	unsigned int nb_columns;
 	int **mtrx;
 }	mtrx_t;
+
 typedef struct row_result {
 	long row_exec_time_us;
 	int values[];
@@ -58,6 +59,7 @@ ssize_t write_all(int fd, const void *buffer, size_t count) {
 	}
 	return (ssize_t)total;
 }
+
 /**
  * prints an error prompt based on the value passed as flag
  */
@@ -179,6 +181,8 @@ int multiply(mtrx_t *A, mtrx_t *B, mtrx_t *C) {
 			exit(EXIT_FAILURE);
 		}
 		int pid = fork();
+		if (pid == -1)
+			return 1;
 		if (pid == 0) {
 			close(fds[0]);
 			dup2(fds[1], STDOUT_FILENO);
@@ -198,7 +202,8 @@ int multiply(mtrx_t *A, mtrx_t *B, mtrx_t *C) {
 				exit(EXIT_FAILURE);
 			row_result->row_exec_time_us = row_exec_time_us;
 			memcpy(row_result->values, C->mtrx[i], sizeof(int) * C->nb_columns);
-			write_all(fds[1], row_result, row_payload_size);
+			if (write_all(fds[1], row_result, row_payload_size) == -1)
+				return 1;
 			free(row_result);
 			freeMatrix(A);
 			freeMatrix(B);
