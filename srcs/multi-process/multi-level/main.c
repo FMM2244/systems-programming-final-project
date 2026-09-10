@@ -160,6 +160,71 @@ void generateRandomMatrix(mtrx_t *res) {
 }
 
 /**
+ * transposis matrix A and stores the output in matrix B
+ */
+int transposition(mtrx_t *A, mtrx_t *B) {
+
+	B->nb_rows = A->nb_columns;
+	B->nb_columns = A->nb_rows;
+
+	B->mtrx = malloc(B->nb_rows * sizeof(int *));
+	if (B->mtrx == NULL) {
+		printf("Error: Can't Transpose Matrix\n");
+		return 1;
+	}
+
+	for (int i = 0; i < B->nb_rows; i++) {
+		B->mtrx[i] = malloc(B->nb_columns * sizeof(int));
+
+		if (B->mtrx[i] == NULL) {
+			for (int j = 0; j < i; j++)
+				free(B->mtrx[j]);
+			free(B->mtrx);
+			printf("Error: Can't Transpose Matrix\n");
+			return 1;
+		}
+	}
+
+	int read_fds[B->nb_rows];
+	bzero(read_fds, sizeof(read_fds));
+
+	for (int i = 0; i < B->nb_rows; i++) {
+		int fds[2];
+		if (pipe(fds) == -1) {
+			perror("pipe");
+			freeMatrix(A);
+			freeMatrix(B);
+			waitForAllChildren();
+			exit(EXIT_FAILURE);
+		}
+		int pid = fork();
+		if (pid == 0) {
+			close(fds[0]);
+			dup2(fds[1], STDOUT_FILENO);
+			for (int j = 0; j < B->nb_columns; j++)
+				B->mtrx[i][j] = A->mtrx[j][i];
+			write(fds[1], B->mtrx[i], sizeof(int) * B->nb_columns);
+			freeMatrix(A);
+			freeMatrix(B);
+			for (int i = 0; read_fds[i] != 0; i++)
+				close(read_fds[i]);
+			exit(EXIT_SUCCESS);
+		}
+		close(fds[1]);
+		read_fds[i] = fds[0];
+	}
+
+	waitForAllChildren();
+
+	for (int i = 0; i < B->nb_rows; i++) {
+		read(read_fds[i], B->mtrx[i], sizeof(int) * B->nb_columns);
+		close(read_fds[i]);
+	}
+
+	return 0;
+}
+
+/**
  * multiplies matrix A by B and stores the result in matrix C
  */
 int multiply(mtrx_t *A, mtrx_t *B, mtrx_t *C) {
@@ -256,7 +321,13 @@ int multiply(mtrx_t *A, mtrx_t *B, mtrx_t *C) {
 		close(read_fds[i]);
 	}
 
-	addRandomRow(C);
+	mtrx_t tmp;
+
+	if (transposition(C, &tmp) == 0) {
+		freeMatrix(C);
+		*C = tmp;
+		addRandomRow(C);
+	}
 
 	return 0;
 }
@@ -305,71 +376,6 @@ int avarage(mtrx_t *m) {
 	}
 
 	return (int)(res / (m->nb_rows * m->nb_columns));
-}
-
-/**
- * transposis matrix A and stores the output in matrix B
- */
-int transposition(mtrx_t *A, mtrx_t *B) {
-
-	B->nb_rows = A->nb_columns;
-	B->nb_columns = A->nb_rows;
-
-	B->mtrx = malloc(B->nb_rows * sizeof(int *));
-	if (B->mtrx == NULL) {
-		printf("Error: Can't Transpose Matrix\n");
-		return 1;
-	}
-
-	for (int i = 0; i < B->nb_rows; i++) {
-		B->mtrx[i] = malloc(B->nb_columns * sizeof(int));
-
-		if (B->mtrx[i] == NULL) {
-			for (int j = 0; j < i; j++)
-				free(B->mtrx[j]);
-			free(B->mtrx);
-			printf("Error: Can't Transpose Matrix\n");
-			return 1;
-		}
-	}
-
-	int read_fds[B->nb_rows];
-	bzero(read_fds, sizeof(read_fds));
-
-	for (int i = 0; i < B->nb_rows; i++) {
-		int fds[2];
-		if (pipe(fds) == -1) {
-			perror("pipe");
-			freeMatrix(A);
-			freeMatrix(B);
-			waitForAllChildren();
-			exit(EXIT_FAILURE);
-		}
-		int pid = fork();
-		if (pid == 0) {
-			close(fds[0]);
-			dup2(fds[1], STDOUT_FILENO);
-			for (int j = 0; j < B->nb_columns; j++)
-				B->mtrx[i][j] = A->mtrx[j][i];
-			write(fds[1], B->mtrx[i], sizeof(int) * B->nb_columns);
-			freeMatrix(A);
-			freeMatrix(B);
-			for (int i = 0; read_fds[i] != 0; i++)
-				close(read_fds[i]);
-			exit(EXIT_SUCCESS);
-		}
-		close(fds[1]);
-		read_fds[i] = fds[0];
-	}
-
-	waitForAllChildren();
-
-	for (int i = 0; i < B->nb_rows; i++) {
-		read(read_fds[i], B->mtrx[i], sizeof(int) * B->nb_columns);
-		close(read_fds[i]);
-	}
-
-	return 0;
 }
 
 /**
