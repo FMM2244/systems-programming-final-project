@@ -1,3 +1,4 @@
+# define _POSIX_C_SOURCE 200809L
 # include <stdio.h>
 # include <stdlib.h>
 # include <unistd.h>
@@ -6,8 +7,12 @@
 # include <sys/types.h>
 # include <sys/socket.h>
 # include <sys/time.h>
+# include <arpa/inet.h>
+# include <netdb.h>
 # include <netinet/in.h>
 # include <pthread.h>
+# include <stdint.h>
+# include <time.h>
 
 /** =============================================================
  * DEFINED STRUCTS HERE
@@ -31,7 +36,7 @@ typedef struct sub {
 
 /** =============================================================
  * GLOBAL VARIABLES HERE
- ** =============================================================
+	** =============================================================
  */
 
 mtrx_t A;
@@ -47,7 +52,6 @@ void handleError(int flag) {
 	case 0:
 		perror("malloc");
 		break;
-	
 	default:
 		break;
 	}
@@ -61,6 +65,100 @@ void waitForAllThreads(pthread_t *th, int size) {
 
 	for (int i = 0; i < size; i++)
 		pthread_join(th[i], NULL);
+	}
+
+static int getNistTimestamp(char *buffer, size_t buffer_size) {
+	const char *hosts[] = {
+		"time.nist.gov",
+		"time-a.nist.gov",
+		"time-b.nist.gov",
+		"time-a.g.nist.gov",
+		"time-b.g.nist.gov"
+	};
+	const size_t host_count = sizeof(hosts) / sizeof(hosts[0]);
+
+	for (size_t i = 0; i < host_count; i++) {
+		int sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+		if (sockfd == -1)
+			continue;
+
+		struct addrinfo hints;
+		struct addrinfo *result = NULL;
+		memset(&hints, 0, sizeof(hints));
+		hints.ai_family = AF_INET;
+		hints.ai_socktype = SOCK_DGRAM;
+		if (getaddrinfo(hosts[i], "123", &hints, &result) != 0) {
+			close(sockfd);
+			continue;
+		}
+
+		struct sockaddr_in server_addr;
+		memset(&server_addr, 0, sizeof(server_addr));
+		memcpy(&server_addr, result->ai_addr, sizeof(server_addr));
+		freeaddrinfo(result);
+
+		uint8_t packet[48] = {0};
+		packet[0] = 0x1b;
+
+		if (sendto(sockfd, packet, sizeof(packet), 0, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1) {
+			close(sockfd);
+			continue;
+		}
+
+		socklen_t server_len = sizeof(server_addr);
+		ssize_t recv_len = recvfrom(sockfd, packet, sizeof(packet), 0, (struct sockaddr *)&server_addr, &server_len);
+		close(sockfd);
+		if (recv_len < 48)
+			continue;
+
+		uint32_t seconds = 0;
+		memcpy(&seconds, packet + 40, sizeof(seconds));
+		seconds = ntohl(seconds);
+		uint64_t unix_time = (uint64_t)seconds - 2208988800ULL;
+		struct tm utc_time;
+		time_t raw_time = (time_t)unix_time;
+		if (gmtime_r(&raw_time, &utc_time) == NULL)
+			continue;
+		if (strftime(buffer, buffer_size, "%Y-%m-%d %H:%M:%S UTC", &utc_time) == 0)
+			continue;
+		return 0;
+	}
+
+	time_t now = time(NULL);
+	struct tm utc_time;
+	if (gmtime_r(&now, &utc_time) == NULL)
+		return -1;
+	if (strftime(buffer, buffer_size, "%Y-%m-%d %H:%M:%S UTC", &utc_time) == 0)
+		return -1;
+	return 0;
+}
+
+static void logTransaction(const char *event, const struct sockaddr_in *peer) {
+	char ts[64];
+	char peer_addr[INET_ADDRSTRLEN];
+	FILE *log_file = fopen("server_transactions.log", "a");
+	if (log_file == NULL)
+		return;
+
+	if (peer != NULL)
+		inet_ntop(AF_INET, &peer->sin_addr, peer_addr, sizeof(peer_addr));
+	else
+		snprintf(peer_addr, sizeof(peer_addr), "unknown");
+
+	if (getNistTimestamp(ts, sizeof(ts)) != 0)
+		snprintf(ts, sizeof(ts), "timestamp-unavailable");
+
+	fprintf(log_file, "[%s] %s from %s\n", ts, event, peer_addr);
+	fclose(log_file);
+}
+
+static void logPeerEvent(const char *event, int client_fd) {
+	struct sockaddr_in peer;
+	socklen_t peer_len = sizeof(peer);
+	if (getpeername(client_fd, (struct sockaddr *)&peer, &peer_len) == 0)
+		logTransaction(event, &peer);
+	else
+		logTransaction(event, NULL);
 }
 
 /**
@@ -121,6 +219,7 @@ void *multiplySubRoutine(void *data) {
 			con->dest->mtrx[con->row_index][j] += A.mtrx[con->row_index][k] * B.mtrx[k][j];
 		}
 	}
+	return NULL;
 }
 
 void *transposeSubRoutine(void *data) {
@@ -291,27 +390,6 @@ int transposition(char mtrx, mtrx_t *C) {
 }
 
 /**
- * prints the output text files on the terminal by executing the cat command
- */
-void printResults() {
-	printf("==================================================================\n");
-	printf("Matrix Multiplication on (A) & (B) result: \n");
-	system("cat a_b_multiplication_result.txt");
-	printf("==================================================================\n");
-	printf("Matrix Transposition on (A) result: \n");
-	system("cat a_transpose_result.txt");
-	printf("==================================================================\n");
-	printf("Matrix Transposition on (B) result: \n");
-	system("cat b_transpose_result.txt");
-	printf("==================================================================\n");
-	printf("Matrix Avarage of (A) result: \n");
-	system("cat a_avarage_result.txt");
-	printf("==================================================================\n");
-	printf("Matrix Avarage of (B) result: \n");
-	system("cat b_avarage_result.txt");
-}
-
-/**
  * multiplication routine
  */
 void *multiplyControler(void *data) {
@@ -352,19 +430,16 @@ static void sendAll(int fd, const char *msg, size_t len) {
 	}
 }
 
-static void sendMatrixResult(int client_fd, mtrx_t *mat) {
+static void sendMatrixResult(int client_fd, const char *label, mtrx_t *mat) {
 	char buffer[2048];
-	int offset = 0;
+	int offset = snprintf(buffer, sizeof(buffer), "%s\n", label);
 	for (unsigned int i = 0; i < mat->nb_rows; i++) {
-		int written = snprintf(buffer + offset, sizeof(buffer) - (size_t)offset, "");
 		for (unsigned int j = 0; j < mat->nb_columns; j++) {
-			written = snprintf(buffer + offset, sizeof(buffer) - (size_t)offset, "%s%d\t", (offset > 0) ? "" : "", mat->mtrx[i][j]);
-			offset += written;
+			offset += snprintf(buffer + offset, sizeof(buffer) - (size_t)offset, "%d\t", mat->mtrx[i][j]);
 			if (offset >= (int)sizeof(buffer) - 32)
 				break;
 		}
-		written = snprintf(buffer + offset, sizeof(buffer) - (size_t)offset, "\n");
-		offset += written;
+		offset += snprintf(buffer + offset, sizeof(buffer) - (size_t)offset, "\n");
 		if (offset >= (int)sizeof(buffer) - 32)
 			break;
 	}
@@ -375,6 +450,8 @@ static void sendMatrixResult(int client_fd, mtrx_t *mat) {
 static void *clientHandler(void *arg) {
 	int client_fd = *(int *)arg;
 	free(arg);
+
+	logPeerEvent("Client connected", client_fd);
 
 	const char *menu = "Welcome to the matrix manipulation server...\nplease choose one of the following options:\n1. Multiplication\n2. Transposition\n3. Average\nChoose a number: ";
 	sendAll(client_fd, menu, strlen(menu));
@@ -392,16 +469,9 @@ static void *clientHandler(void *arg) {
 	if (choice == 1) {
 		mtrx_t C;
 		if (multiply(&C) == 0) {
-			char output[2048];
-			int offset = 0;
-			for (unsigned int i = 0; i < C.nb_rows; i++) {
-				for (unsigned int j = 0; j < C.nb_columns; j++) {
-					offset += snprintf(output + offset, sizeof(output) - (size_t)offset, "%d\t", C.mtrx[i][j]);
-				}
-				offset += snprintf(output + offset, sizeof(output) - (size_t)offset, "\n");
-			}
-			output[offset] = '\0';
-			sendAll(client_fd, output, strlen(output));
+			sendMatrixResult(client_fd, "Matrix A:", &A);
+			sendMatrixResult(client_fd, "Matrix B:", &B);
+			sendMatrixResult(client_fd, "Multiplication result:", &C);
 			freeMatrix(&C);
 		}
 		else {
@@ -411,16 +481,9 @@ static void *clientHandler(void *arg) {
 	else if (choice == 2) {
 		mtrx_t T;
 		if (transposition('A', &T) == 0) {
-			char output[2048];
-			int offset = 0;
-			for (unsigned int i = 0; i < T.nb_rows; i++) {
-				for (unsigned int j = 0; j < T.nb_columns; j++) {
-					offset += snprintf(output + offset, sizeof(output) - (size_t)offset, "%d\t", T.mtrx[i][j]);
-				}
-				offset += snprintf(output + offset, sizeof(output) - (size_t)offset, "\n");
-			}
-			output[offset] = '\0';
-			sendAll(client_fd, output, strlen(output));
+			sendMatrixResult(client_fd, "Matrix A:", &A);
+			sendMatrixResult(client_fd, "Matrix B:", &B);
+			sendMatrixResult(client_fd, "Transposition result:", &T);
 			freeMatrix(&T);
 		}
 		else {
@@ -429,6 +492,8 @@ static void *clientHandler(void *arg) {
 	}
 	else if (choice == 3) {
 		int result = avarage('A');
+		sendMatrixResult(client_fd, "Matrix A:", &A);
+		sendMatrixResult(client_fd, "Matrix B:", &B);
 		snprintf(reply, sizeof(reply), "Average = %d\n", result);
 		sendAll(client_fd, reply, strlen(reply));
 	}
@@ -437,6 +502,7 @@ static void *clientHandler(void *arg) {
 		sendAll(client_fd, reply, strlen(reply));
 	}
 
+	logPeerEvent("Client disconnected", client_fd);
 	close(client_fd);
 	return NULL;
 }
@@ -475,7 +541,7 @@ void *transposeControler(void *data) {
 	struct timeval tranStart;
 	gettimeofday(&tranStart, NULL);
 	mtrx_t D;
-	bzero(&D, sizeof(mtrx_t *));
+	memset(&D, 0, sizeof(D));
 	int flag = transposition(mtrx, &D);
 	struct timeval tranEnd;
 	gettimeofday(&tranEnd, NULL);
@@ -488,6 +554,7 @@ void *transposeControler(void *data) {
 	else
 		printf("Error: Can't Transpose Matrix\n");
 	close(fd);
+	return NULL;
 }
 
 /**
@@ -529,6 +596,7 @@ void *avarageControler(void *data) {
 	dprintf(fd, "Time taken: %ld us\n", (long)((avgEnd.tv_sec - avgStart.tv_sec) * 1000000 + avgEnd.tv_usec - avgStart.tv_usec));
 	dprintf(fd, "Matrix (A) Avarage = %d\n", E);
 	close(fd);
+	return NULL;
 }
 
 int main(int argc, char *argv[]) {
@@ -568,6 +636,7 @@ int main(int argc, char *argv[]) {
 		close(sockfd);
 		return 1;
 	}
+	printf("Server is running on port %s...\n", argv[1]);
 	clilen = sizeof(cli_addr);
 
 	while (1) {
